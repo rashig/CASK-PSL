@@ -44,6 +44,7 @@ import co.cask.hydrator.plugin.common.Properties;
 import com.google.common.collect.ImmutableMap;
 import org.junit.Assert;
 import org.junit.Before;
+import org.junit.Ignore;
 import org.junit.Test;
 
 import java.io.File;
@@ -58,6 +59,8 @@ import java.util.concurrent.TimeoutException;
 /**
  * Test for XMLReaderBatchSource.
  */
+// TODO: re-enable once plugin implementation is merged: https://github.com/caskdata/hydrator-plugins/pull/285
+@Ignore
 public class XMLReaderTest extends ETLTestBase {
   private static final Schema TRANSFORM_SCHEMA = Schema.recordOf(
     "xmlTransform",
@@ -80,7 +83,7 @@ public class XMLReaderTest extends ETLTestBase {
     ServiceManager serviceManager = applicationManager.getServiceManager(UploadFile.
                                                                            FileSetService.class.getSimpleName());
     serviceManager.start();
-    serviceManager.waitForStatus(true, PROGRAM_START_STOP_TIMEOUT_SECONDS, 120);
+    serviceManager.waitForStatus(true, PROGRAM_START_STOP_TIMEOUT_SECONDS, 1);
 
     serviceURL = serviceManager.getServiceURL();
     URL url = new URL(serviceURL, "xmlreadersource/create");
@@ -149,13 +152,6 @@ public class XMLReaderTest extends ETLTestBase {
   }
 
   @Test
-  /**
-   * This test case is for
-   * 1. Not to process already processed xml file.
-   * 2. Read xml with valid node path
-   * 3. Archiv xml to the target location provided
-   * 4. Delete data from file track table which is after expiry period.
-   */
   public void testPreProcessingNotRequired() throws Exception {
     String xmlTrackingTable = "XMLNoPreProcessingReqTrackingTable";
     Map<String, String> sourceProperties = new ImmutableMap.Builder<String, String>()
@@ -179,12 +175,14 @@ public class XMLReaderTest extends ETLTestBase {
     KeyValueTable keyValueTable = trackingTable.get();
 
     //Set expired record, 30 days old
+    //This record must get deleted as tableExpiryPeriod is 30 days.
     String expiredPreprocessedFilePath = sourcePath + "catalog.xml";
     Calendar cal = Calendar.getInstance();
     cal.add(Calendar.DATE, -30);
     long expiryPreprocessedTime = cal.getTime().getTime();
     keyValueTable.write(Bytes.toBytes(expiredPreprocessedFilePath), Bytes.toBytes(expiryPreprocessedTime));
 
+    //Set preprocessed file having processed date less than tableExpiryPeriod = 30 days.
     String preprocessedFilePath = sourcePath + "catalogProcessedFile.xml";
     long preProcessedTime = new Date().getTime();
     keyValueTable.write(Bytes.toBytes(preprocessedFilePath), Bytes.toBytes(preProcessedTime));
@@ -195,6 +193,7 @@ public class XMLReaderTest extends ETLTestBase {
 
     DataSetManager<Table> outputManager = getTableDataset(outputDatasetName);
     Table outputTable = outputManager.get();
+    //price node get fetched for valid node path /catalog/book/price.
     Row firstRow = outputTable.get(Bytes.toBytes("22"));
     Assert.assertEquals("<price><base>44.95</base><tax><surcharge>10.00</surcharge><excise>10.00</excise></tax></price>"
       , firstRow.getString("record"));
@@ -216,18 +215,12 @@ public class XMLReaderTest extends ETLTestBase {
     byte[] expiredFileprocessedTime = keyValueTable.read(expiredPreprocessedFilePath);
     Assert.assertNotEquals(expiryPreprocessedTime, Bytes.toLong(expiredFileprocessedTime));
 
-    //Processing time of the prepocessed file must not change.
+    //Preprocessed file with processed date less than tableExpiryPeriod = 30 days, must not get processed.
     byte[] preprocessedFileTime = keyValueTable.read(preprocessedFilePath);
     Assert.assertEquals(preProcessedTime, Bytes.toLong(preprocessedFileTime));
   }
 
   @Test
-  /**
-   * This test case is for
-   * 1. Pre-processing required - process already processed xml file.
-   * 2. Read xml with valid node path.
-   * 3. No File action - file must not get deleted, moved or archived.
-   */
   public void testPreProcessingRequired() throws Exception {
     String xmlTrackingTable = "XMLPreProcessingReqTrackingTable";
     String preprocessedFilePath = sourcePath + "catalog.xml";
@@ -260,35 +253,29 @@ public class XMLReaderTest extends ETLTestBase {
 
     DataSetManager<Table> outputManager = getTableDataset(outputDatasetName);
     Table outputTable = outputManager.get();
+    //price node get fetched for valid node path /catalog/book/price.
     Row row = outputTable.get(Bytes.toBytes("128"));
     Assert.assertEquals("<price><base>49.95</base><tax><surcharge>21.00</surcharge><excise>21.00</excise></tax></price>"
       , row.getString("record"));
 
-    //File not get deleted, moved or archived.
+    //File not get deleted, moved or archived as actionAfterProcess = none.
     URL url = new URL(serviceURL, "fileExist/xmlreadersource?path=catalog.xml");
     HttpResponse response = getRestClient().execute(HttpMethod.GET, url, getClientConfig().getAccessToken());
     Assert.assertTrue(Boolean.valueOf(response.getResponseBodyAsString()));
 
-    //Processing time of the prepocessed file must change.
+    //Processing time of the prepocessed file must change as reprocessingRequired = Yes.
     byte[] preprocessedFileTime = keyValueTable.read(preprocessedFilePath);
     Assert.assertNotEquals(preProcessedTime, Bytes.toLong(preprocessedFileTime));
   }
 
   @Test
-  /**
-   * This test case is for
-   * 1. Not to process already processed xml file.
-   * 2. Read xml with invalid node path.
-   * 3. Move xml to the target location provided
-   * 4. No data get Deleted from file track table which is before expiry period.
-   */
   public void testInvalidNodePathWithMoveAction() throws Exception {
     String xmlTrackingTable = "XMLInvalidNodePathTrackingTable";
     Map<String, String> sourceProperties = new ImmutableMap.Builder<String, String>()
       .put(Constants.Reference.REFERENCE_NAME, "XMLReaderInvalidNodePathTest")
       .put("path", sourcePath)
       .put("targetFolder", targetPath)
-      .put("nodePath", "/catalog/book/prices") //invalid path, price changed to prices
+      .put("nodePath", "/catalog/book/prices") //invalid path, price node changed to prices node
       .put("reprocessingRequired", "No")
       .put("tableName", xmlTrackingTable)
       .put("actionAfterProcess", "move")
@@ -304,7 +291,8 @@ public class XMLReaderTest extends ETLTestBase {
     DataSetManager<KeyValueTable> trackingTable = getKVTableDataset(xmlTrackingTable);
     KeyValueTable keyValueTable = trackingTable.get();
 
-    //Set expired record, 20 days old
+    //Set expired record, 20 days old.
+    //This record must not get deleted as tableExpiryPeriod is 30 days.
     String preprocessedFilePath = sourcePath + "catalogProcessedFile.xml";
     Calendar cal = Calendar.getInstance();
     cal.add(Calendar.DATE, -20);
@@ -317,6 +305,7 @@ public class XMLReaderTest extends ETLTestBase {
 
     DataSetManager<Table> outputManager = getTableDataset(outputDatasetName);
     Table outputTable = outputManager.get();
+    //No record fetched for invalid node path.
     Row row1 = outputTable.get(Bytes.toBytes("22"));
     Assert.assertNull(row1.getString("record"));
     Row row2 = outputTable.get(Bytes.toBytes("128"));
@@ -342,11 +331,6 @@ public class XMLReaderTest extends ETLTestBase {
   }
 
   @Test
-  /**
-   * This test case is for
-   * 1. Read xml file matching to pattern provided.
-   * 2. Delete xml file after processing.
-   */
   public void testPatternWithDeleteAction() throws Exception {
     String xmlTrackingTable = "XMLPatternTrackingTable";
     Map<String, String> sourceProperties = new ImmutableMap.Builder<String, String>()
