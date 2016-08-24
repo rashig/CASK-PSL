@@ -27,6 +27,7 @@ import co.cask.cdap.etl.api.PipelineConfigurer;
 import co.cask.cdap.etl.api.Transform;
 import co.cask.cdap.etl.api.TransformContext;
 import com.google.common.base.Preconditions;
+import com.google.common.base.Strings;
 import com.google.common.collect.Lists;
 
 import java.util.HashMap;
@@ -43,10 +44,13 @@ import java.util.Set;
 @Name("Normalize")
 @Description("Convert wide rows and reducing data to it canonicalize form")
 public class Normalize extends Transform<StructuredRecord, StructuredRecord> {
+  private static final String NAME_KEY_SUFFIX = "_name";
+  private static final String VALUE_KEY_SUFFIX = "_value";
+
   private final NormalizeConfig config;
 
   private Schema outputSchema;
-  private Map<String, String> inputOutputFieldMap;
+  private Map<String, String> mappingFieldMap;
   private Map<String, String> normalizeFieldMap;
   private List<String> normalizeFieldList;
 
@@ -57,60 +61,134 @@ public class Normalize extends Transform<StructuredRecord, StructuredRecord> {
   @Override
   public void configurePipeline(PipelineConfigurer pipelineConfigurer) throws IllegalArgumentException {
     super.configurePipeline(pipelineConfigurer);
-    pipelineConfigurer.getStageConfigurer().setOutputSchema(getOutputSchema());
-  }
+    config.validate();
 
-  private Schema getOutputSchema() {
-    //create output schema
-    List<Schema.Field> outputFields = Lists.newArrayList();
-    inputOutputFieldMap = new HashMap<String, String>();
+    try {
+      outputSchema = Schema.parseJson(config.outputSchema);
+      for (Schema.Field outputField : outputSchema.getFields()) {
+        Schema fieldSchema = outputField.getSchema();
+        Schema.Type fieldType = fieldSchema.isNullable() ? fieldSchema.getNonNullable().getType() :
+          fieldSchema.getType();
+        Preconditions.checkArgument(fieldType == Schema.Type.STRING,
+                                    "All output schema fields must be of type STRING.");
+      }
+      pipelineConfigurer.getStageConfigurer().setOutputSchema(outputSchema);
+    } catch (Exception e) {
+      throw new IllegalArgumentException("Invalid output schema: " + e.getMessage(), e);
+    }
+
+    Schema inputSchema = pipelineConfigurer.getStageConfigurer().getInputSchema();
+    List<String> fieldList = Lists.newArrayList();
+    //Validate mapping fields
     String[] fieldMappingArray = config.fieldMapping.split(",");
     for (String fieldMapping : fieldMappingArray) {
       String[] mappings = fieldMapping.split(":");
-      Preconditions.checkArgument(mappings.length == 2, "Input and output schema fields mapping is invalid.");
-      inputOutputFieldMap.put(mappings[0], mappings[1]);
-      outputFields.add(Schema.Field.of(mappings[1], Schema.of(Schema.Type.STRING)));
+      Preconditions.checkArgument(mappings.length == 2, "Mapping field '" + mappings[0] + "' is invalid. Both input" +
+        " and output schema fields required.");
+      //Input schema cannot be null, check added for JUnit test case run.
+      if (inputSchema != null) {
+        Preconditions.checkArgument(inputSchema.getField(mappings[0]) != null, "Mapping field '" + mappings[0]
+          + "' not present in input schema.");
+      }
+      Preconditions.checkArgument(outputSchema.getField(mappings[1]) != null, "Output schema mapping field '" +
+        mappings[1] + "' not present in output schema.");
+      fieldList.add(mappings[0]);
+    }
+
+    //Validate normalizing fields
+    String[] fieldNormalizingArray = config.fieldNormalizing.split(",");
+
+    //Type and Value mapping for all normalize fields must be same, otherwise it is invalid.
+    //Read type and value from first normalize fields which is used for validation.
+    String[] typeValueFields = fieldNormalizingArray[0].split(":");
+    Preconditions.checkArgument(typeValueFields.length == 3, "Normalizing field '" + typeValueFields[0] +
+      "' is invalid. Field Type and Field Value columns required.");
+    String validTypeField = typeValueFields[1];
+    String validValueField = typeValueFields[2];
+
+    for (String fieldNormalizing : fieldNormalizingArray) {
+      String[] fields = fieldNormalizing.split(":");
+      Preconditions.checkArgument(fields.length == 3, "Normalizing field '" + fields[0] + "' is invalid. " +
+        " Field Type and Field Value columns required.");
+      //Input schema cannot be null, check added for JUnit test case run.
+      if (inputSchema != null) {
+        Preconditions.checkArgument(inputSchema.getField(fields[0]) != null, "Normalizing field '" + fields[0]
+          + "' not present in input schema.");
+      }
+      Preconditions.checkArgument(!fieldList.contains(fields[0]), "'" + fields[0] + "' cannot be use for " +
+        "both mapping as well as normalize fields.");
+      Preconditions.checkArgument(validTypeField.equals(fields[1]), "Type mapping is invalid for " +
+        "normalize field '" + fields[0] + "'. It must be same for all normalize fields.");
+      Preconditions.checkArgument(validValueField.equals(fields[2]), "Value mapping is invalid for " +
+        "normalize field '" + fields[0] + "'. It must be same for all normalize fields.");
+      Preconditions.checkArgument(outputSchema.getField(fields[1]) != null, "Type mapping '" + fields[1] +
+        "' not present in output schema.");
+      Preconditions.checkArgument(outputSchema.getField(fields[1]) != null, "Value mapping '" + fields[2] +
+        "' not present in output schema.");
+    }
+  }
+
+  private void initializeFieldData() {
+    if (normalizeFieldList != null) {
+      return;
+    }
+
+    mappingFieldMap = new HashMap<String, String>();
+    String[] fieldMappingArray = config.fieldMapping.split(",");
+    for (String fieldMapping : fieldMappingArray) {
+      String[] mappings = fieldMapping.split(":");
+      mappingFieldMap.put(mappings[0], mappings[1]);
     }
 
     normalizeFieldMap = new HashMap<String, String>();
     normalizeFieldList = Lists.newArrayList();
     String[] fieldNormalizingArray = config.fieldNormalizing.split(",");
+
     for (String fieldNormalizing : fieldNormalizingArray) {
-      String[] normalizing = fieldNormalizing.split(":");
-      Preconditions.checkArgument(normalizing.length == 3, "Normalizing fields mapping is invalid.");
-      normalizeFieldList.add(normalizing[0]);
-      normalizeFieldMap.put(normalizing[0] + "_name", normalizing[1]);
-      normalizeFieldMap.put(normalizing[0] + "_value", normalizing[2]);
-      outputFields.add(Schema.Field.of(normalizing[1], Schema.of(Schema.Type.STRING)));
-      outputFields.add(Schema.Field.of(normalizing[2], Schema.of(Schema.Type.STRING)));
+      String[] fields = fieldNormalizing.split(":");
+      normalizeFieldList.add(fields[0]);
+      normalizeFieldMap.put(fields[0] + NAME_KEY_SUFFIX, fields[1]);
+      normalizeFieldMap.put(fields[0] + VALUE_KEY_SUFFIX, fields[2]);
     }
-    return Schema.recordOf("outputSchema", outputFields);
   }
 
   @Override
   public void initialize(TransformContext context) throws Exception {
     super.initialize(context);
-    if (outputSchema == null) {
-      outputSchema = getOutputSchema();
+    initializeFieldData();
+    if (outputSchema != null) {
+      return;
+    }
+    try {
+      outputSchema = Schema.parseJson(config.outputSchema);
+    } catch (Exception e) {
+      throw new IllegalArgumentException("Invalid output schema: " + e.getMessage(), e);
     }
   }
 
   @Override
   public void transform(StructuredRecord structuredRecord, Emitter<StructuredRecord> emitter) throws Exception {
     for (String normalizeField : normalizeFieldList) {
+      if (structuredRecord.get(normalizeField) == null) {
+        continue;
+      }
       StructuredRecord.Builder builder = StructuredRecord.builder(outputSchema);
-      builder.set(normalizeFieldMap.get(normalizeField + "_name"), normalizeField)
-        .set(normalizeFieldMap.get(normalizeField + "_value"), structuredRecord.get(normalizeField));
+      String normalizeFieldValue = String.valueOf(structuredRecord.get(normalizeField));
+      //Set normalize fields to the record
+      builder.set(normalizeFieldMap.get(normalizeField + NAME_KEY_SUFFIX), normalizeField)
+        .set(normalizeFieldMap.get(normalizeField + VALUE_KEY_SUFFIX), normalizeFieldValue);
 
-      Set<String> keySet = inputOutputFieldMap.keySet();
-      Iterator<String>  itr = keySet.iterator();
+      //Set mapping fields to the record
+      Set<String> keySet = mappingFieldMap.keySet();
+      Iterator<String> itr = keySet.iterator();
       while (itr.hasNext()) {
         String field = itr.next();
-        builder.set(inputOutputFieldMap.get(field), structuredRecord.get(field));
+        builder.set(mappingFieldMap.get(field), String.valueOf(structuredRecord.get(field)));
       }
       emitter.emit(builder.build());
     }
   }
+
   /**
    * Configuration for the Normalize transform.
    */
@@ -120,13 +198,40 @@ public class Normalize extends Transform<StructuredRecord, StructuredRecord> {
     private final String fieldMapping;
 
     @Description("Specify the normalize field name, to what output field it should be mapped to and where the value " +
-      "needs to be added. Example: ItemId:AttributeType:AttributeValue, here ItemId text will be saved to " +
-      "AttributeType field and its value will be saved to AttributeValue field of output schema.")
+      "needs to be added. Example: ItemId:AttributeType:AttributeValue, here ItemId column name will be saved to " +
+      "AttributeType field and its value will be saved to AttributeValue field of output schema")
     private final String fieldNormalizing;
 
-    public NormalizeConfig(String fieldMapping, String fieldNormalizing) {
+    @Description("The output schema for the data as it will be formatted in CDAP. Sample schema: {\n" +
+      "    \"type\": \"schema\",\n" +
+      "    \"name\": \"outputSchema\",\n" +
+      "    \"fields\": [\n" +
+      "        {\n" +
+      "            \"name\": \"id\",\n" +
+      "            \"type\": \"string\"\n" +
+      "        },\n" +
+      "        {\n" +
+      "            \"name\": \"type\",\n" +
+      "            \"type\": \"string\"\n" +
+      "        },\n" +
+      "        {\n" +
+      "            \"name\": \"value\",\n" +
+      "            \"type\": \"string\"\n" +
+      "        }" +
+      "    ]\n" +
+      "}")
+    private final String outputSchema;
+
+    public NormalizeConfig(String fieldMapping, String fieldNormalizing, String outputSchema) {
       this.fieldMapping = fieldMapping;
       this.fieldNormalizing = fieldNormalizing;
+      this.outputSchema = outputSchema;
+    }
+
+    private void validate() {
+      Preconditions.checkArgument(!Strings.isNullOrEmpty(fieldMapping), "Fields to mapped cannot be empty.");
+      Preconditions.checkArgument(!Strings.isNullOrEmpty(fieldNormalizing), "Fields to normalized cannot be empty.");
+      Preconditions.checkArgument(!Strings.isNullOrEmpty(outputSchema), "Output schema cannot be empty.");
     }
   }
 }

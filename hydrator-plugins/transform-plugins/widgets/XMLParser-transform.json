@@ -8,11 +8,8 @@
       "properties": [
         {
           "widget-type": "textbox",
-          "label": "Input field to Parse as XML Record",
-          "name": "input",
-          "widget-attributes": {
-            "width": "large"
-          }
+          "label": "Input field to parse as an XML record",
+          "name": "input"
         },
         {
           "widget-type": "select",
@@ -20,8 +17,8 @@
           "name": "encoding",
           "widget-attributes": {
             "values": [
-              "UTF-8",
               "ISO-8859-1",
+              "UTF-8",
               "UTF-8 (using character entities)",
               "UTF-16 (Unicode with byte-order mark)"
             ],
@@ -31,9 +28,27 @@
         {
           "widget-type": "keyvalue",
           "label": "XPath Mappings",
-          "name": "xpathMappings",
+          "name": "xPathMappings",
           "widget-attributes": {
             "showDelimiter": "false"
+          }
+        },
+        {
+          "widget-type": "keyvalue-dropdown",
+          "label": "Field Name Schema Type Mapping",
+          "name": "fieldTypeMapping",
+          "widget-attributes": {
+            "showDelimiter": "false",
+            "dropdownOptions": [
+              "boolean",
+              "bytes",
+              "double",
+              "float",
+              "int",
+              "long",
+              "string"
+            ],
+            "key-placeholder": "Field Name"
           }
         },
         {
@@ -48,27 +63,12 @@
             ],
             "default": "Ignore error and continue"
           }
-        },
-        {
-          "widget-type": "keyvalue-dropdown",
-          "label": "Field Name Schema Type Mapping",
-          "name": "fieldTypeMapping",
-          "widget-attributes": {
-            "showDelimiter": "false",
-            "dropdownOptions": [
-              "boolean",
-              "int",
-              "long",
-              "float",
-              "double",
-              "bytes",
-              "string"
-            ],
-            "key-placeholder": "Field Name"
-          }
         }
       ]
     }
   ],
+  "errorDataset": {
+    "errorDatasetTooltip": "Dataset that collects error messages from emitter."
+  },
   "outputs": []
 }

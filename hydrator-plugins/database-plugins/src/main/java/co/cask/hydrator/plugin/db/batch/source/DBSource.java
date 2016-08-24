@@ -17,6 +17,7 @@
 package co.cask.hydrator.plugin.db.batch.source;
 
 import co.cask.cdap.api.annotation.Description;
+import co.cask.cdap.api.annotation.Macro;
 import co.cask.cdap.api.annotation.Name;
 import co.cask.cdap.api.annotation.Plugin;
 import co.cask.cdap.api.data.batch.Input;
@@ -40,6 +41,7 @@ import co.cask.hydrator.plugin.DBUtils;
 import co.cask.hydrator.plugin.DriverCleanup;
 import co.cask.hydrator.plugin.FieldCase;
 import co.cask.hydrator.plugin.StructuredRecordUtils;
+import com.google.common.base.Strings;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.io.LongWritable;
 import org.apache.hadoop.mapreduce.MRJobConfig;
@@ -47,6 +49,7 @@ import org.apache.hadoop.mapreduce.lib.db.DBConfiguration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
 import java.sql.Connection;
 import java.sql.Driver;
 import java.sql.DriverManager;
@@ -81,30 +84,10 @@ public class DBSource extends ReferenceBatchSource<LongWritable, DBRecord, Struc
   @Override
   public void configurePipeline(PipelineConfigurer pipelineConfigurer) {
     super.configurePipeline(pipelineConfigurer);
-    // validate macro syntax
-    sourceConfig.validate();
     dbManager.validateJDBCPluginPipeline(pipelineConfigurer, getJDBCPluginId());
-    boolean hasOneSplit = false;
-    if (sourceConfig.numSplits != null) {
-      if (sourceConfig.numSplits < 1) {
-        throw new IllegalArgumentException(
-          "Invalid value for numSplits. Must be at least 1, but got " + sourceConfig.numSplits);
-      }
-      if (sourceConfig.numSplits == 1) {
-        hasOneSplit = true;
-      }
-    }
-    if (!hasOneSplit) {
-      if (!sourceConfig.getImportQuery().contains("$CONDITIONS")) {
-        throw new IllegalArgumentException(String.format("Import Query %s must contain the string '$CONDITIONS'.",
-                                                         sourceConfig.importQuery));
-      }
-      if (sourceConfig.splitBy == null || sourceConfig.splitBy.isEmpty()) {
-        throw new IllegalArgumentException("The splitBy must be specified if numSplits is not set to 1.");
-      }
-      if (sourceConfig.boundingQuery == null || sourceConfig.boundingQuery.isEmpty()) {
-        throw new IllegalArgumentException("The boundingQuery must be specified if numSplits is not set to 1.");
-      }
+    sourceConfig.validate();
+    if (!Strings.isNullOrEmpty(sourceConfig.schema)) {
+      pipelineConfigurer.getStageConfigurer().setOutputSchema(sourceConfig.getSchema());
     }
   }
 
@@ -185,7 +168,8 @@ public class DBSource extends ReferenceBatchSource<LongWritable, DBRecord, Struc
 
   @Override
   public void prepareRun(BatchSourceContext context) throws Exception {
-    sourceConfig.substituteMacros(context);
+    sourceConfig.validate();
+
     LOG.debug("pluginType = {}; pluginName = {}; connectionString = {}; importQuery = {}; " +
                 "boundingQuery = {}",
               sourceConfig.jdbcPluginType, sourceConfig.jdbcPluginName,
@@ -205,10 +189,17 @@ public class DBSource extends ReferenceBatchSource<LongWritable, DBRecord, Struc
                                         sourceConfig.getImportQuery(), sourceConfig.getBoundingQuery(),
                                         sourceConfig.getEnableAutoCommit());
     if (sourceConfig.numSplits == null || sourceConfig.numSplits != 1) {
+      if (!sourceConfig.getImportQuery().contains("$CONDITIONS")) {
+        throw new IllegalArgumentException(String.format("Import Query %s must contain the string '$CONDITIONS'.",
+                                                         sourceConfig.importQuery));
+      }
       hConf.set(DBConfiguration.INPUT_ORDER_BY_PROPERTY, sourceConfig.splitBy);
     }
     if (sourceConfig.numSplits != null) {
       hConf.setInt(MRJobConfig.NUM_MAPS, sourceConfig.numSplits);
+    }
+    if (sourceConfig.schema != null) {
+      hConf.set(DBUtils.OVERRIDE_SCHEMA, sourceConfig.schema);
     }
     context.setInput(Input.of(sourceConfig.referenceName,
                               new SourceInputFormatProvider(DataDrivenETLDBInputFormat.class, hConf)));
@@ -247,6 +238,7 @@ public class DBSource extends ReferenceBatchSource<LongWritable, DBRecord, Struc
     public static final String BOUNDING_QUERY = "boundingQuery";
     public static final String SPLIT_BY = "splitBy";
     public static final String NUM_SPLITS = "numSplits";
+    public static final String SCHEMA = "schema";
 
     @Name(IMPORT_QUERY)
     @Description("The SELECT query to use to import data from the specified table. " +
@@ -254,6 +246,7 @@ public class DBSource extends ReferenceBatchSource<LongWritable, DBRecord, Struc
       "The Query should contain the '$CONDITIONS' string unless numSplits is set to one. " +
       "For example, 'SELECT * FROM table WHERE $CONDITIONS'. The '$CONDITIONS' string" +
       "will be replaced by 'splitBy' field limits specified by the bounding query.")
+    @Macro
     String importQuery;
 
     @Nullable
@@ -261,11 +254,13 @@ public class DBSource extends ReferenceBatchSource<LongWritable, DBRecord, Struc
     @Description("Bounding Query should return the min and max of the " +
       "values of the 'splitBy' field. For example, 'SELECT MIN(id),MAX(id) FROM table'. " +
       "This is required unless numSplits is set to one.")
+    @Macro
     String boundingQuery;
 
     @Nullable
     @Name(SPLIT_BY)
     @Description("Field Name which will be used to generate splits. This is required unless numSplits is set to one.")
+    @Macro
     String splitBy;
 
     @Nullable
@@ -273,7 +268,15 @@ public class DBSource extends ReferenceBatchSource<LongWritable, DBRecord, Struc
     @Description("The number of splits to generate. If set to one, the boundingQuery is not needed, " +
       "and no $CONDITIONS string needs to be specified in the importQuery. If not specified, the " +
       "execution framework will pick a value.")
+    @Macro
     Integer numSplits;
+
+    @Nullable
+    @Name(SCHEMA)
+    @Description("The schema of records output by the source. This will be used in place of whatever schema comes " +
+      "back from the query. This should only be used if there is a bug in your jdbc driver. For example, if a column " +
+      "is not correctly getting marked as nullable.")
+    String schema;
 
     private String getImportQuery() {
       return cleanQuery(importQuery);
@@ -281,6 +284,42 @@ public class DBSource extends ReferenceBatchSource<LongWritable, DBRecord, Struc
 
     private String getBoundingQuery() {
       return cleanQuery(boundingQuery);
+    }
+
+    private void validate() {
+      boolean hasOneSplit = false;
+      if (!containsMacro("numSplits") && numSplits != null) {
+        if (numSplits < 1) {
+          throw new IllegalArgumentException(
+            "Invalid value for numSplits. Must be at least 1, but got " + numSplits);
+        }
+        if (numSplits == 1) {
+          hasOneSplit = true;
+        }
+      }
+
+      if (!hasOneSplit && !containsMacro("importQuery") && !getImportQuery().contains("$CONDITIONS")) {
+        throw new IllegalArgumentException(String.format("Import Query %s must contain the string '$CONDITIONS'.",
+                                                         importQuery));
+      }
+
+      if (!hasOneSplit && !containsMacro("splitBy") && (splitBy == null || splitBy.isEmpty())) {
+        throw new IllegalArgumentException("The splitBy must be specified if numSplits is not set to 1.");
+      }
+
+      if (!hasOneSplit && !containsMacro("boundingQuery") && (boundingQuery == null || boundingQuery.isEmpty())) {
+        throw new IllegalArgumentException("The boundingQuery must be specified if numSplits is not set to 1.");
+      }
+
+    }
+
+    private Schema getSchema() {
+      try {
+        return Schema.parseJson(schema);
+      } catch (IOException e) {
+        throw new IllegalArgumentException(String.format("Unable to parse schema '%s'. Reason: %s",
+                                                         schema, e.getMessage()), e);
+      }
     }
   }
 }

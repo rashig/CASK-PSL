@@ -17,6 +17,7 @@
 package co.cask.hydrator.plugin.batch.sink;
 
 import co.cask.cdap.api.annotation.Description;
+import co.cask.cdap.api.annotation.Macro;
 import co.cask.cdap.api.annotation.Name;
 import co.cask.cdap.api.annotation.Plugin;
 import co.cask.cdap.api.data.batch.Output;
@@ -51,7 +52,7 @@ import java.io.IOException;
  * https://www.elastic.co/guide/en/elasticsearch/guide/current/_index_settings.html.
  * <p/>
  */
-@Plugin(type = "batchsink")
+@Plugin(type = BatchSink.PLUGIN_TYPE)
 @Name("Elasticsearch")
 @Description("Elasticsearch Batch Sink takes the structured record from the input source and converts it " +
   "to a JSON string, then indexes it in Elasticsearch using the index, type, and id specified by the user.")
@@ -83,8 +84,7 @@ public class BatchElasticsearchSink extends ReferenceBatchSink<StructuredRecord,
     conf.set("es.input.json", "yes");
     conf.set("es.mapping.id", config.idField);
 
-    context.addOutput(Output.of(config.referenceName, new SinkOutputFormatProvider(EsOutputFormat.class, conf))
-                        .alias(config.index));
+    context.addOutput(Output.of(config.referenceName, new SinkOutputFormatProvider(EsOutputFormat.class, conf)));
   }
 
   @Override
@@ -99,18 +99,22 @@ public class BatchElasticsearchSink extends ReferenceBatchSink<StructuredRecord,
   public static class ESConfig extends ReferencePluginConfig {
     @Name(ESProperties.HOST)
     @Description(HOST_DESCRIPTION)
+    @Macro
     private String hostname;
 
     @Name(ESProperties.INDEX_NAME)
     @Description(INDEX_DESCRIPTION)
+    @Macro
     private String index;
 
     @Name(ESProperties.TYPE_NAME)
     @Description(TYPE_DESCRIPTION)
+    @Macro
     private String type;
 
     @Name(ESProperties.ID_FIELD)
     @Description(ID_DESCRIPTION)
+    @Macro
     private String idField;
 
     public ESConfig(String referenceName, String hostname, String index, String type, String idField) {

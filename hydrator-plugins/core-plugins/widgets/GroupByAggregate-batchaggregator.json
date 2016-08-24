@@ -34,13 +34,15 @@
               "alias": "alias"
             },
             "dropdownOptions": [
-              "Count",
-              "Sum",
               "Avg",
-              "Min",
-              "Max",
+              "Count",
               "First",
-              "Last"
+              "Last",
+              "Max",
+              "Min",
+              "Stddev",
+              "Sum",
+              "Variance"
             ]
           }
         },

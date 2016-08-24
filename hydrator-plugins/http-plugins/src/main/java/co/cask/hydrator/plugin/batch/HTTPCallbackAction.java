@@ -17,6 +17,7 @@
 package co.cask.hydrator.plugin.batch;
 
 import co.cask.cdap.api.annotation.Description;
+import co.cask.cdap.api.annotation.Macro;
 import co.cask.cdap.api.annotation.Name;
 import co.cask.cdap.api.annotation.Plugin;
 import co.cask.cdap.etl.api.PipelineConfigurer;
@@ -63,10 +64,10 @@ public class HTTPCallbackAction extends PostAction {
   @SuppressWarnings("ConstantConditions")
   @Override
   public void run(BatchActionContext batchActionContext) throws Exception {
+    conf.validate();
     if (!conf.shouldRun(batchActionContext)) {
       return;
     }
-    conf.substituteMacros(batchActionContext);
 
     int retries = 0;
     Exception exception = null;
@@ -121,17 +122,21 @@ public class HTTPCallbackAction extends PostAction {
       "the pipeline run succeeded or failed. " +
       "If set to 'success', the action will only be executed if the pipeline run succeeded. " +
       "If set to 'failure', the action will only be executed if the pipeline run failed.")
+    @Macro
     public String runCondition;
 
     @Description("The http request method.")
+    @Macro
     private String method;
 
     @Nullable
     @Description("The http request body.")
+    @Macro
     private String body;
 
     @Nullable
     @Description("The number of times the request should be retried if the request fails. Defaults to 0.")
+    @Macro
     private Integer numRetries;
 
     public HttpRequestConf() {
@@ -147,18 +152,22 @@ public class HTTPCallbackAction extends PostAction {
     @SuppressWarnings("ConstantConditions")
     public void validate() {
       super.validate();
-      if (!METHODS.contains(method.toUpperCase())) {
+      if (!containsMacro("method") && !METHODS.contains(method.toUpperCase())) {
         throw new IllegalArgumentException(String.format("Invalid request method %s, must be one of %s.",
                                                          method, Joiner.on(',').join(METHODS)));
       }
-      if (numRetries < 0) {
+      if (!containsMacro("numRetries") && numRetries < 0) {
         throw new IllegalArgumentException(String.format(
           "Invalid numRetries %d. Retries cannot be a negative number.", numRetries));
       }
     }
 
     public boolean shouldRun(BatchActionContext context) {
-      return new ConditionConfig(runCondition).shouldRun(context);
+      if (!containsMacro("runCondition")) {
+        return new ConditionConfig(runCondition).shouldRun(context);
+      } else {
+        return false;
+      }
     }
   }
 }

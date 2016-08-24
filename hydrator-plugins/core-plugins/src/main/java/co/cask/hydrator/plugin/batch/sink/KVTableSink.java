@@ -17,6 +17,7 @@
 package co.cask.hydrator.plugin.batch.sink;
 
 import co.cask.cdap.api.annotation.Description;
+import co.cask.cdap.api.annotation.Macro;
 import co.cask.cdap.api.annotation.Name;
 import co.cask.cdap.api.annotation.Plugin;
 import co.cask.cdap.api.common.Bytes;
@@ -28,6 +29,7 @@ import co.cask.cdap.api.plugin.PluginConfig;
 import co.cask.cdap.etl.api.Emitter;
 import co.cask.cdap.etl.api.PipelineConfigurer;
 import co.cask.hydrator.common.SchemaValidator;
+import co.cask.hydrator.plugin.common.BatchReadableWritableConfig;
 import co.cask.hydrator.plugin.common.Properties;
 import com.google.common.base.Preconditions;
 
@@ -44,16 +46,13 @@ import javax.annotation.Nullable;
 @Description("Writes records to a KeyValueTable, using configurable fields from input records as the key and value.")
 public class KVTableSink extends BatchWritableSink<StructuredRecord, byte[], byte[]> {
 
-  private static final String NAME_DESC = "Name of the dataset. If it does not already exist, one will be created.";
   private static final String KEY_FIELD_DESC = "The name of the field to use as the key. Defaults to 'key'.";
   private static final String VALUE_FIELD_DESC = "The name of the field to use as the value. Defaults to 'value'.";
 
   /**
    * Config class for KVTableSink
    */
-  public static class KVTableConfig extends PluginConfig {
-    @Description(NAME_DESC)
-    private String name;
+  public static class KVTableConfig extends BatchReadableWritableConfig {
 
     @Name(Properties.KeyValueTable.KEY_FIELD)
     @Description(KEY_FIELD_DESC)
@@ -70,7 +69,7 @@ public class KVTableSink extends BatchWritableSink<StructuredRecord, byte[], byt
     }
 
     public KVTableConfig(String name, String keyField, String valueField) {
-      this.name = name;
+      super(name);
       this.keyField = keyField;
       this.valueField = valueField;
     }
@@ -79,6 +78,7 @@ public class KVTableSink extends BatchWritableSink<StructuredRecord, byte[], byt
   private final KVTableConfig kvTableConfig;
 
   public KVTableSink(KVTableConfig kvTableConfig) {
+    super(kvTableConfig);
     this.kvTableConfig = kvTableConfig;
   }
 
@@ -112,15 +112,10 @@ public class KVTableSink extends BatchWritableSink<StructuredRecord, byte[], byt
 
   @Override
   protected Map<String, String> getProperties() {
-
     Map<String, String> properties;
-    // will be null only in tests
-    if (kvTableConfig.getProperties() == null) {
-      properties = new HashMap<>();
-    } else {
-      properties = new HashMap<>(kvTableConfig.getProperties().getProperties());
-    }
-    properties.put(Properties.BatchReadableWritable.NAME, kvTableConfig.name);
+    properties = new HashMap<>(kvTableConfig.getProperties().getProperties());
+
+    properties.put(Properties.BatchReadableWritable.NAME, kvTableConfig.getName());
     properties.put(Properties.BatchReadableWritable.TYPE, KeyValueTable.class.getName());
     return properties;
   }

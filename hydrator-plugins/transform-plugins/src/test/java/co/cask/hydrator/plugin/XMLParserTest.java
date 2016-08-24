@@ -27,13 +27,13 @@ import co.cask.cdap.etl.mock.batch.MockSource;
 import co.cask.cdap.etl.proto.v2.ETLBatchConfig;
 import co.cask.cdap.etl.proto.v2.ETLPlugin;
 import co.cask.cdap.etl.proto.v2.ETLStage;
-import co.cask.cdap.proto.Id;
 import co.cask.cdap.proto.artifact.AppRequest;
 import co.cask.cdap.proto.id.ApplicationId;
 import co.cask.cdap.proto.id.NamespaceId;
 import co.cask.cdap.test.ApplicationManager;
 import co.cask.cdap.test.DataSetManager;
 import co.cask.cdap.test.MapReduceManager;
+import co.cask.hydrator.common.MockPipelineConfigurer;
 import co.cask.hydrator.common.test.MockEmitter;
 import co.cask.hydrator.common.test.MockTransformContext;
 import com.google.common.collect.ImmutableList;
@@ -55,38 +55,17 @@ public class XMLParserTest extends TransformPluginsTestBase {
 
   @Test
   public void testInvalidConfig() throws Exception {
+    XMLParser.Config config = new XMLParser.Config("body", "UTF-8", "category://book/@category,title://book/title," +
+      "year:/bookstore/book[price>35.00]/year,price:/bookstore/book[price>35.00]/price,subcategory://book/subcategory",
+                                                   "category:,title:string,price:double,year:int,subcategory:string",
+                                                   "Exit on error");
 
-    String inputTable = "input-xpath-with-multiple-elements";
-    ETLStage source = new ETLStage("source", MockSource.getPlugin(inputTable));
-    Map<String, String> sourceProperties = new ImmutableMap.Builder<String, String>()
-      .put("input", "body")
-      .put("encoding", "UTF-8")
-      .put("xpathMappings", "category://book/@category,title://book/title,year:/bookstore/book[price>35.00]/year," +
-        "price:/bookstore/book[price>35.00]/price,subcategory://book/subcategory")
-      .put("fieldTypeMapping", "category:,title:string,price:double,year:int,subcategory:string")
-      .put("processOnError", "Exit on error")
-      .build();
-
-    ETLStage transform = new ETLStage("transform",
-                                      new ETLPlugin("XMLParser", Transform.PLUGIN_TYPE, sourceProperties, null));
-    String sinkTable = "output-xpath-with-multiple-elements";
-
-    ETLStage sink = new ETLStage("sink", MockSink.getPlugin(sinkTable));
-    ETLBatchConfig etlConfig = ETLBatchConfig.builder("* * * * *")
-      .addStage(source)
-      .addStage(transform)
-      .addStage(sink)
-      .addConnection(source.getName(), transform.getName())
-      .addConnection(transform.getName(), sink.getName())
-      .build();
-
-    AppRequest<ETLBatchConfig> appRequest = new AppRequest<>(ETLBATCH_ARTIFACT, etlConfig);
-    ApplicationId appId = NamespaceId.DEFAULT.app("XMLReaderTest");
+    MockPipelineConfigurer configurer = new MockPipelineConfigurer(INPUT);
     try {
-      deployApplication(appId.toId(), appRequest);
+      new XMLParser(config).configurePipeline(configurer);
       Assert.fail();
-    } catch (IllegalStateException e) {
-      // expected - since value missing for field category.
+    } catch (IllegalArgumentException e) {
+      Assert.assertEquals("Type cannot be null. Please specify type for category", e.getMessage());
     }
   }
 
@@ -98,7 +77,7 @@ public class XMLParserTest extends TransformPluginsTestBase {
     Map<String, String> sourceProperties = new ImmutableMap.Builder<String, String>()
       .put("input", "body")
       .put("encoding", "UTF-8")
-      .put("xpathMappings", "title:/book/title,author:/book/author,year:/book/year")
+      .put("xPathMappings", "title:/book/title,author:/book/author,year:/book/year")
       .put("fieldTypeMapping", "title:string,author:string,year:string")
       .put("processOnError", "Write to error dataset")
       .build();
@@ -116,10 +95,9 @@ public class XMLParserTest extends TransformPluginsTestBase {
       .addConnection(transform.getName(), sink.getName())
       .build();
 
-
     AppRequest<ETLBatchConfig> appRequest = new AppRequest<>(ETLBATCH_ARTIFACT, etlConfig);
-    Id.Application appId = Id.Application.from(Id.Namespace.DEFAULT, "XMLParserTest");
-    ApplicationManager appManager = deployApplication(appId, appRequest);
+    ApplicationId appId = NamespaceId.DEFAULT.app("XMLReaderTest");
+    ApplicationManager appManager = deployApplication(appId.toId(), appRequest);
 
     DataSetManager<Table> inputManager = getDataset(inputTable);
     List<StructuredRecord> input = ImmutableList.of(
@@ -135,8 +113,8 @@ public class XMLParserTest extends TransformPluginsTestBase {
 
     DataSetManager<Table> outputManager = getDataset(sinkTable);
     List<StructuredRecord> outputRecords = MockSink.readOutput(outputManager);
-    StructuredRecord record = outputRecords.get(0);
     Assert.assertEquals("OutputRecords", 1, outputRecords.size());
+    StructuredRecord record = outputRecords.get(0);
     Assert.assertEquals("Everyday Italian", record.get("title"));
     Assert.assertEquals("Giada De Laurentiis", record.get("author"));
   }
@@ -147,11 +125,11 @@ public class XMLParserTest extends TransformPluginsTestBase {
     ETLStage source = new ETLStage("source", MockSource.getPlugin(inputTable));
     Map<String, String> sourceProperties = new ImmutableMap.Builder<String, String>()
       .put("input", "body")
-      .put("encoding", "UTF-8")
-      .put("xpathMappings", "category://book/@category,title://book/title,year:/bookstore/book[price>35.00]/year," +
+      .put("encoding", "UTF-16 (Unicode with byte-order mark)")
+      .put("xPathMappings", "category://book/@category,title://book/title,year:/bookstore/book[price>35.00]/year," +
         "price:/bookstore/book[price>35.00]/price,subcategory://book/subcategory")
       .put("fieldTypeMapping", "category:string,title:string,price:double,year:int,subcategory:string")
-      .put("processOnError", "Exit on error")
+      .put("processOnError", "Ignore error and continue")
       .build();
 
     ETLStage transform = new ETLStage("transform",
@@ -244,8 +222,8 @@ public class XMLParserTest extends TransformPluginsTestBase {
 
   @Test
   public void testIgnoreError() throws Exception {
-    XMLParser.Config config = new XMLParser.Config("body", "UTF-8", "title:/book/title,author:/book/author," +
-      "year:/book/year", "title:string,author:string,year:int", "Ignore the error record and continue");
+    XMLParser.Config config = new XMLParser.Config("body", "ISO-8859-1", "title:/book/title,author:/book/author," +
+      "year:/book/year", "title:string,author:string,year:int", "Ignore error and continue");
     Transform<StructuredRecord, StructuredRecord> transform = new XMLParser(config);
     transform.initialize(new MockTransformContext());
     List<StructuredRecord> input = ImmutableList.of(
@@ -285,6 +263,7 @@ public class XMLParserTest extends TransformPluginsTestBase {
 
       MockEmitter<StructuredRecord> emitter = new MockEmitter<>();
       transform.transform(inputRecord, emitter);
+      Assert.fail();
     } catch (IllegalStateException e) {
       LOG.error("Test passes. Exiting on exception.", e);
     }
@@ -297,7 +276,7 @@ public class XMLParserTest extends TransformPluginsTestBase {
     Map<String, String> sourceProperties = new ImmutableMap.Builder<String, String>()
       .put("input", "body")
       .put("encoding", "UTF-8")
-      .put("xpathMappings", "category://book/@category,title://book/title")
+      .put("xPathMappings", "category://book/@category,title://book/title")
       .put("fieldTypeMapping", "category:string,title:string")
       .put("processOnError", "Exit on error")
       .build();
@@ -316,8 +295,8 @@ public class XMLParserTest extends TransformPluginsTestBase {
       .build();
 
     AppRequest<ETLBatchConfig> appRequest = new AppRequest<>(ETLBATCH_ARTIFACT, etlConfig);
-    Id.Application appId = Id.Application.from(Id.Namespace.DEFAULT, "XMLParserTest");
-    ApplicationManager appManager = deployApplication(appId, appRequest);
+    ApplicationId appId = NamespaceId.DEFAULT.app("XMLReaderTest");
+    ApplicationManager appManager = deployApplication(appId.toId(), appRequest);
 
     DataSetManager<Table> inputManager = getDataset(inputTable);
     List<StructuredRecord> input = ImmutableList.of(
@@ -329,12 +308,9 @@ public class XMLParserTest extends TransformPluginsTestBase {
           "<year>2005</year><price>29.99</price></book></bookstore>").build()
     );
     MockSource.writeInput(inputManager, input);
-    try {
-      MapReduceManager mrManager = appManager.getMapReduceManager(ETLMapReduce.NAME);
-      mrManager.start();
-      mrManager.waitForFinish(5, TimeUnit.MINUTES);
-    } catch (IllegalStateException e) {
-      Assert.assertEquals("Terminating process in error : Cannot specify XPath that are arrays", e.getMessage());
-    }
+    MapReduceManager mrManager = appManager.getMapReduceManager(ETLMapReduce.NAME);
+    mrManager.start();
+    mrManager.waitForFinish(5, TimeUnit.MINUTES);
+    Assert.assertEquals("FAILED", mrManager.getHistory().get(0).getStatus().name());
   }
 }
