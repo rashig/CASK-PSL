@@ -1,0 +1,137 @@
+{
+  "metadata": {
+    "spec-version": "1.0"
+  },
+  "configuration-groups": [
+    {
+      "label": "DynamoDB Configuration",
+      "properties": [
+        {
+          "widget-type": "textbox",
+          "label": "Reference Name",
+          "name": "referenceName"
+        },
+        {
+          "widget-type": "password",
+          "label": "Access Key",
+          "name": "accessKey"
+        },
+        {
+          "widget-type": "password",
+          "label": "Secret Access Key",
+          "name": "secretAccessKey"
+        },
+        {
+          "widget-type": "select",
+          "label": "Region ID",
+          "name": "regionId",
+          "widget-attributes": {
+            "values": [
+              "us-gov-west-1",
+              "us-east-1",
+              "us-east-2",
+              "us-west-1",
+              "us-west-2",
+              "eu-west-1",
+              "eu-west-2",
+              "eu-central-1",
+              "ap-south-1",
+              "ap-southeast-1",
+              "ap-southeast-2",
+              "ap-northeast-1",
+              "ap-northeast-2",
+              "sa-east-1",
+              "cn-north-1",
+              "ca-central-1"
+            ]
+          }
+        },
+        {
+          "widget-type": "textbox",
+          "label": "Endpoint URL",
+          "name": "endpointUrl"
+        },
+        {
+          "widget-type": "textbox",
+          "label": "Table Name",
+          "name": "tableName"
+        },
+        {
+          "widget-type": "textbox",
+          "label": "Query",
+          "name": "query"
+        },
+        {
+          "widget-type": "textbox",
+          "label": "Filter Query",
+          "name": "filterQuery"
+        },
+        {
+          "widget-type": "keyvalue",
+          "label": "Attribute Name Map",
+          "name": "nameMappings",
+          "widget-attributes": {
+            "showDelimiter": "false",
+            "kv-delimiter": "|",
+            "key-placeholder": "Attribute Name Placeholder",
+            "value-placeholder": "Placeholder Value"
+          }
+        },
+        {
+          "widget-type": "keyvalue",
+          "label": "Attribute Value Map",
+          "name": "valueMappings",
+          "widget-attributes": {
+            "showDelimiter": "false",
+            "kv-delimiter": "|",
+            "key-placeholder": "Attribute Value Placeholder",
+            "value-placeholder": "Placeholder Value"
+          }
+        },
+        {
+          "widget-type": "keyvalue-dropdown",
+          "label": "Placeholders and Its type",
+          "name": "placeholderType",
+          "widget-attributes": {
+            "showDelimiter": "false",
+            "kv-delimiter": "|",
+            "dropdownOptions": [
+              "boolean",
+              "int",
+              "long",
+              "float",
+              "double",
+              "string"
+            ],
+            "key-placeholder": "Placeholder Type"
+          }
+        },
+        {
+          "widget-type": "textbox",
+          "label": "Read Throughput",
+          "name": "readThroughput"
+        },
+        {
+          "widget-type": "textbox",
+          "label": "Read Throughput Percentage",
+          "name": "readThroughputPercentage"
+        }
+      ]
+    }
+  ],
+  "outputs": [
+    {
+      "widget-type": "non-editable-schema-editor",
+      "schema": {
+        "name": "etlSchemaBody",
+        "type": "record",
+        "fields": [
+          {
+            "name": "body",
+            "type": "string"
+          }
+        ]
+      }
+    }
+  ]
+}
